@@ -37,27 +37,41 @@ export function saveProfile(profile) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(profile))
 }
 
+// Skills a rising 2nd grader who knows add/sub within 20 has already mastered.
+// Pre-seeding these triggers the unlockNextSkills cascade so they start at an
+// appropriate level (doubles, 2-digit addition, missing addend) rather than
+// getting trivial questions they already know cold.
+const PREMASTERED = {
+  add_within_10: 0.95,
+  add_within_20: 0.95,
+  sub_within_10: 0.95,
+  sub_within_20: 0.90,
+}
+
 function createInitialProfile() {
   const now = Date.now()
   const skills = {}
   SKILLS.forEach(s => {
+    const pre = PREMASTERED[s.id]
     skills[s.id] = {
       skill_id: s.id,
-      mastery_score: STARTER_SKILLS.includes(s.id) ? 0.3 : 0,
+      mastery_score: pre ?? (STARTER_SKILLS.includes(s.id) ? 0.3 : 0),
       speed_rating: 1.0,
-      attempts: 0,
+      attempts: pre ? 4 : 0,
       next_review_date: now,
-      unlocked: STARTER_SKILLS.includes(s.id),
-      consecutive_correct: 0,
+      unlocked: !!(pre || STARTER_SKILLS.includes(s.id)),
+      consecutive_correct: pre ? 4 : 0,
     }
   })
-  return {
-    skills,
-    totalBolts: 10,
-    totalBricks: 5,
-    createdAt: now,
-    lastSession: null,
-  }
+
+  let profile = { skills, totalBolts: 10, totalBricks: 5, createdAt: now, lastSession: null }
+
+  // Run the unlock cascade for every premastered skill so their successors open up
+  Object.keys(PREMASTERED).forEach(skillId => {
+    profile = unlockNextSkills(profile, skillId)
+  })
+
+  return profile
 }
 
 // ── Streak management ───────────────────────────────────────────────────────

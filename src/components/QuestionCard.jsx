@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import NumPad from './NumPad.jsx'
 import ChoicePad from './ChoicePad.jsx'
 import Robot from './Robot.jsx'
+import VisualAid from './visuals/VisualAid.jsx'
 
 export default function QuestionCard({ question, onAnswer, questionNum, totalQuestions, timedMode = false }) {
   const [input, setInput] = useState('')
@@ -130,6 +131,11 @@ export default function QuestionCard({ question, onAnswer, questionNum, totalQue
           )}
         </AnimatePresence>
       </div>
+
+      {/* Visual teaching aid (RSM/Beast Academy style) */}
+      {question.visual && (
+        <VisualAid visual={question.visual} phase={phase} />
+      )}
 
       {/* Result overlay */}
       <AnimatePresence>
