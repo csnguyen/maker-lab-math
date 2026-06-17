@@ -305,22 +305,25 @@ function PlaceValueBlocks({ hundreds = 0, tens = 0, ones = 0 }) {
         </div>
       )}
 
-      {/* Tens — vertical rods */}
+      {/* Tens — vertical rods, each with exactly 10 unit squares */}
       {tens > 0 && (
         <div className="flex flex-col items-center gap-1.5">
-          <div className="flex gap-1.5 flex-wrap justify-center" style={{ maxWidth: 110 }}>
+          <div className="flex gap-1.5 flex-wrap justify-center" style={{ maxWidth: 120 }}>
             {Array.from({ length: tens }).map((_, i) => (
               <motion.div key={i}
                 initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: (hundreds > 0 ? 0.3 : 0) + i * 0.08 }}
                 style={{
-                  width: 13, height: 58,
-                  background: 'linear-gradient(180deg, #34d399, #10b981)',
-                  border: '2px solid #059669', borderRadius: 4,
-                  display: 'flex', flexDirection: 'column', gap: 2, padding: '3px 2px',
+                  width: 16,
+                  border: '2px solid #059669', borderRadius: 4, overflow: 'hidden',
+                  display: 'flex', flexDirection: 'column',
                 }}>
-                {Array.from({ length: 5 }).map((_, j) => (
-                  <div key={j} style={{ flex: 1, background: 'rgba(255,255,255,0.3)', borderRadius: 1 }} />
+                {Array.from({ length: 10 }).map((_, j) => (
+                  <div key={j} style={{
+                    width: '100%', height: 14,
+                    background: j % 2 === 0 ? '#34d399' : '#10b981',
+                    borderBottom: j < 9 ? '1px solid #059669' : 'none',
+                  }} />
                 ))}
               </motion.div>
             ))}
