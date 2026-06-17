@@ -9,12 +9,13 @@ import {
 } from './engine/sync.js'
 
 export default function App() {
-  const [playerName,   setPlayerName]   = useState(() => loadPlayerName())
-  const [gameState,    setGameState]    = useState(() => loadLocalGameState())
-  const [loginLoading, setLoginLoading] = useState(false)
-  const [screen,       setScreen]       = useState('dashboard') // 'dashboard' | 'race'
-  const [syncStatus,   setSyncStatus]   = useState(null)
-  const [lastResult,   setLastResult]   = useState(null)
+  const [playerName,    setPlayerName]    = useState(() => loadPlayerName())
+  const [gameState,     setGameState]     = useState(() => loadLocalGameState())
+  const [globalMastery, setGlobalMastery] = useState({})
+  const [loginLoading,  setLoginLoading]  = useState(false)
+  const [screen,        setScreen]        = useState('dashboard') // 'dashboard' | 'race'
+  const [syncStatus,    setSyncStatus]    = useState(null)
+  const [lastResult,    setLastResult]    = useState(null)
 
   // ── Login ─────────────────────────────────────────────────────────────────
   async function handleLogin(name) {
@@ -25,6 +26,7 @@ export default function App() {
         applyRemoteProfile(data)
         const gs = data.game_states?.lego_racing ?? defaultGameState()
         setGameState(gs); saveLocalGameState(gs)
+        setGlobalMastery(data.global_math_mastery ?? {})
       } else {
         const fresh = defaultGameState()
         await pushProgress(name, fresh)
@@ -39,24 +41,28 @@ export default function App() {
   }
 
   // ── Save progress ─────────────────────────────────────────────────────────
-  async function saveProgress(newState) {
+  async function saveProgress(newState, masteryDelta = {}) {
     setSyncStatus('saving')
     setGameState(newState); saveLocalGameState(newState)
     try {
-      await pushProgress(playerName, newState)
+      await pushProgress(playerName, newState, masteryDelta)
       setSyncStatus('saved')
       setTimeout(() => setSyncStatus(null), 2000)
     } catch { setSyncStatus('error') }
   }
 
   // ── Race complete ─────────────────────────────────────────────────────────
-  function handleRaceComplete({ position, coinsEarned = 0, replay = false }) {
+  function handleRaceComplete({ position, coinsEarned = 0, updatedMastery = {}, replay = false }) {
+    setScreen('dashboard')
     if (!replay) {
       setLastResult({ position, coinsEarned })
+      // Merge updated mastery locally so next race starts with correct ZPD
+      if (Object.keys(updatedMastery).length > 0) {
+        setGlobalMastery(prev => ({ ...prev, ...updatedMastery }))
+      }
       const updated = { ...gameState, earned_coins: (gameState.earned_coins ?? 0) + coinsEarned }
-      saveProgress(updated)
+      saveProgress(updated, updatedMastery)
     }
-    setScreen('dashboard')
   }
 
   // ── Logout ────────────────────────────────────────────────────────────────
@@ -72,6 +78,7 @@ export default function App() {
       <RaceScreen
         playerName={playerName}
         gameState={gameState}
+        globalMastery={globalMastery}
         onRaceComplete={handleRaceComplete}
       />
     )
