@@ -10,7 +10,7 @@
  */
 
 import { Redis } from '@upstash/redis'
-import { REDIS_KEY, defaultProfile, mergeProfile } from '../../shared/schema.js'
+import { REDIS_KEY, defaultProfile, mergeProfile } from '../shared/schema.js'
 
 const useRedis = !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN)
 

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import PitStop from './PitStop.jsx'
 import { initMastery, generateQuestion, generateBossQuestion, SKILLS, SKILL_ORDER } from '../engine/curriculum.js'
 import { updateMastery, applySkipLogic, selectSkill, masteryDelta } from '../engine/mastery.js'
+import { computeCarStats } from '../engine/garage.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const RACE_LENGTH      = 1.0
@@ -24,106 +25,371 @@ const AI_COLORS    = ['#ef4444', '#22c55e', '#f59e0b']
 const PLAYER_COLOR = '#60a5fa'
 const BOSS_COLOR   = '#ffd700'
 
-// ── Road & car rendering (unchanged from Phase 2) ──────────────────────────────
-function renderRoad(ctx, W, H, scroll) {
-  const HZ = H * 0.40, CX = W / 2
-  const RW_TOP = W * 0.06, RW_BOT = W * 0.46
+// ── LEGO Racers visual rendering ───────────────────────────────────────────────
+function drawPalmTree(ctx, x, y, scale) {
+  // Trunk: brown LEGO-brick column
+  ctx.fillStyle = '#92400E'
+  ctx.fillRect(x - 2.5 * scale, y - 22 * scale, 5 * scale, 22 * scale)
+  // Trunk highlight
+  ctx.fillStyle = 'rgba(255,255,255,0.18)'
+  ctx.fillRect(x - 1 * scale, y - 22 * scale, 1.5 * scale, 22 * scale)
+  // Leaves — 3 triangular fronds
+  const frondColors = ['#16A34A', '#22C55E', '#15803D']
+  for (let i = 0; i < 3; i++) {
+    const angle = (i / 3) * Math.PI * 2 - Math.PI / 2
+    ctx.fillStyle = frondColors[i]
+    ctx.beginPath()
+    ctx.moveTo(x, y - 22 * scale)
+    ctx.lineTo(x + Math.cos(angle) * 15 * scale, y - 22 * scale + Math.sin(angle) * 10 * scale)
+    ctx.lineTo(x + Math.cos(angle + 0.5) * 9 * scale, y - 22 * scale + Math.sin(angle + 0.5) * 7 * scale)
+    ctx.closePath(); ctx.fill()
+  }
+  // Coconut
+  ctx.fillStyle = '#78350F'
+  ctx.beginPath(); ctx.arc(x, y - 23 * scale, 2.5 * scale, 0, Math.PI * 2); ctx.fill()
+}
 
+function drawLegoFlag(ctx, x, y, scale, color) {
+  // Pole
+  ctx.strokeStyle = '#6B7280'; ctx.lineWidth = 1.5 * scale
+  ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - 20 * scale); ctx.stroke()
+  // Flag
+  ctx.fillStyle = color
+  ctx.beginPath()
+  ctx.moveTo(x, y - 20 * scale)
+  ctx.lineTo(x + 10 * scale, y - 17 * scale)
+  ctx.lineTo(x, y - 14 * scale)
+  ctx.fill()
+}
+
+function renderRoad(ctx, W, H, scroll) {
+  const HZ = H * 0.42, CX = W / 2
+  const RW_TOP = W * 0.07, RW_BOT = W * 0.48
+
+  // ── Bright blue sky ──────────────────────────────────────────────────────
   const sky = ctx.createLinearGradient(0, 0, 0, HZ)
-  sky.addColorStop(0, '#060318'); sky.addColorStop(1, '#1a0850')
+  sky.addColorStop(0, '#1D4ED8'); sky.addColorStop(1, '#7DD3FC')
   ctx.fillStyle = sky; ctx.fillRect(0, 0, W, HZ)
 
-  ctx.fillStyle = '#fff'
-  for (let i = 0; i < 40; i++) {
-    ctx.globalAlpha = 0.3 + (i % 4) * 0.15
-    ctx.fillRect((i * 137 + 11) % W, (i * 73 + 7) % (HZ - 8), 1.5, 1.5)
+  // ── Clouds ───────────────────────────────────────────────────────────────
+  const cloudDefs = [
+    { bx: 0.12, by: 0.15, r: 20, drift: 0.6 },
+    { bx: 0.48, by: 0.08, r: 17, drift: 1.0 },
+    { bx: 0.75, by: 0.22, r: 14, drift: 0.8 },
+    { bx: 0.30, by: 0.30, r: 11, drift: 1.2 },
+  ]
+  for (const c of cloudDefs) {
+    const cx = ((c.bx * W + scroll * c.drift * 3) % (W + 100)) - 50
+    const cy = c.by * HZ
+    ctx.fillStyle = 'rgba(255,255,255,0.92)'
+    ctx.beginPath(); ctx.ellipse(cx, cy, c.r * 1.5, c.r * 0.75, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.ellipse(cx + c.r, cy + 3, c.r * 0.9, c.r * 0.65, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.ellipse(cx - c.r * 0.9, cy + 4, c.r * 0.8, c.r * 0.58, 0, 0, Math.PI * 2); ctx.fill()
   }
-  ctx.globalAlpha = 1
 
-  ctx.fillStyle = '#0c0328'; ctx.beginPath(); ctx.moveTo(0, HZ)
-  for (let x = 0; x <= W + 20; x += 20) ctx.lineTo(x, HZ - 14 - Math.sin(x * 0.03 + scroll * 0.15) * 9)
+  // ── Rolling hills on horizon ─────────────────────────────────────────────
+  ctx.fillStyle = '#15803D'
+  ctx.beginPath(); ctx.moveTo(0, HZ)
+  for (let x = 0; x <= W + 10; x += 20)
+    ctx.lineTo(x, HZ - 18 - Math.sin(x * 0.022 + scroll * 0.06) * 14)
+  ctx.lineTo(W, HZ); ctx.fill()
+  // Second layer lighter
+  ctx.fillStyle = '#16A34A'
+  ctx.beginPath(); ctx.moveTo(0, HZ)
+  for (let x = 0; x <= W + 10; x += 20)
+    ctx.lineTo(x, HZ - 8 - Math.sin(x * 0.035 + scroll * 0.09 + 1.2) * 8)
   ctx.lineTo(W, HZ); ctx.fill()
 
-  for (let i = 0; i < 7; i++) {
-    const t1 = ((i / 7 + scroll * 0.028) % 1), t2 = (((i + 0.48) / 7 + scroll * 0.028) % 1)
-    if (t2 < t1) continue
+  // ── Grass verge (checkerboard LEGO pattern) ───────────────────────────────
+  for (let i = 0; i < 9; i++) {
+    const t1 = (i / 9), t2 = ((i + 0.52) / 9)
     const y1 = HZ + (H - HZ) * t1, y2 = HZ + (H - HZ) * t2
-    const hw1 = RW_TOP + (RW_BOT - RW_TOP) * t1, hw2 = RW_TOP + (RW_BOT - RW_TOP) * t2
-    const c = i % 2 === 0 ? '#163a08' : '#1c4a0a'
+    const hw1 = RW_TOP + (RW_BOT - RW_TOP) * t1
+    const hw2 = RW_TOP + (RW_BOT - RW_TOP) * t2
+    const c = i % 2 === 0 ? '#22C55E' : '#16A34A'
     ctx.fillStyle = c
     ctx.beginPath(); ctx.moveTo(0, y1); ctx.lineTo(CX - hw1, y1); ctx.lineTo(CX - hw2, y2); ctx.lineTo(0, y2); ctx.fill()
     ctx.beginPath(); ctx.moveTo(W, y1); ctx.lineTo(CX + hw1, y1); ctx.lineTo(CX + hw2, y2); ctx.lineTo(W, y2); ctx.fill()
   }
 
+  // ── Road surface ──────────────────────────────────────────────────────────
   ctx.beginPath()
   ctx.moveTo(CX - RW_TOP, HZ); ctx.lineTo(CX + RW_TOP, HZ)
-  ctx.lineTo(CX + RW_BOT, H); ctx.lineTo(CX - RW_BOT, H)
-  ctx.fillStyle = '#38383c'; ctx.fill()
+  ctx.lineTo(CX + RW_BOT, H);  ctx.lineTo(CX - RW_BOT, H)
+  ctx.fillStyle = '#6B7280'; ctx.fill()
+  // Subtle edge shadow
+  const roadShade = ctx.createLinearGradient(CX - RW_BOT, 0, CX + RW_BOT, 0)
+  roadShade.addColorStop(0, 'rgba(0,0,0,0.22)'); roadShade.addColorStop(0.12, 'rgba(0,0,0,0)')
+  roadShade.addColorStop(0.88, 'rgba(0,0,0,0)'); roadShade.addColorStop(1, 'rgba(0,0,0,0.22)')
+  ctx.beginPath()
+  ctx.moveTo(CX - RW_TOP, HZ); ctx.lineTo(CX + RW_TOP, HZ)
+  ctx.lineTo(CX + RW_BOT, H);  ctx.lineTo(CX - RW_BOT, H)
+  ctx.fillStyle = roadShade; ctx.fill()
 
+  // ── Roadside palm trees ───────────────────────────────────────────────────
+  const palmBases = [0.08, 0.28, 0.52, 0.72, 0.88]
+  for (const base of palmBases) {
+    const t = ((base + scroll * 0.020) % 1)
+    if (t > 0.94 || t < 0.02) continue
+    const py = HZ + (H - HZ) * t
+    const hw = RW_TOP + (RW_BOT - RW_TOP) * t
+    const sc = 0.18 + 0.82 * t
+    drawPalmTree(ctx, CX - hw - 18 * sc, py, sc)
+    drawPalmTree(ctx, CX + hw + 18 * sc, py, sc)
+  }
+
+  // ── LEGO brick walls on road edges ────────────────────────────────────────
+  const brickPalette = ['#EF4444','#FBBF24','#3B82F6','#22C55E','#EF4444','#FBBF24','#A855F7']
   for (let i = 0; i < 10; i++) {
-    const t1 = ((i / 10 + scroll * 0.028) % 1), t2 = (((i + 0.42) / 10 + scroll * 0.028) % 1)
+    const t = ((i / 10 + scroll * 0.028) % 1)
+    const tNext = (((i + 1) / 10 + scroll * 0.028) % 1)
+    if (tNext < t || t > 0.96) continue
+    const y  = HZ + (H - HZ) * t
+    const hw = RW_TOP + (RW_BOT - RW_TOP) * t
+    const sc = 0.22 + 0.78 * t
+    const bW = 15 * sc, bH = 9 * sc
+    const cL = brickPalette[i % brickPalette.length]
+    const cR = brickPalette[(i + 3) % brickPalette.length]
+
+    for (const [bx, col] of [[CX - hw - bW * 0.6, cL], [CX + hw + bW * 0.6, cR]]) {
+      // Brick face
+      ctx.fillStyle = col
+      ctx.beginPath(); ctx.roundRect(bx - bW/2, y - bH/2, bW, bH, 1.5); ctx.fill()
+      // Top sheen
+      ctx.fillStyle = 'rgba(255,255,255,0.35)'
+      ctx.beginPath(); ctx.roundRect(bx - bW/2, y - bH/2, bW, bH * 0.38, [1.5,1.5,0,0]); ctx.fill()
+      // Dark outline
+      ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 0.8
+      ctx.beginPath(); ctx.roundRect(bx - bW/2, y - bH/2, bW, bH, 1.5); ctx.stroke()
+      // LEGO stud (2 per brick)
+      for (const sx of [bx - bW * 0.22, bx + bW * 0.22]) {
+        ctx.fillStyle = col
+        ctx.beginPath(); ctx.ellipse(sx, y - bH/2 - 1.8 * sc, 2.2 * sc, 1.4 * sc, 0, 0, Math.PI * 2); ctx.fill()
+        ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 0.6
+        ctx.beginPath(); ctx.ellipse(sx, y - bH/2 - 1.8 * sc, 2.2 * sc, 1.4 * sc, 0, 0, Math.PI * 2); ctx.stroke()
+      }
+    }
+  }
+
+  // ── Flags every few segments ──────────────────────────────────────────────
+  const flagBases = [0.18, 0.62]
+  const flagColors = ['#EF4444', '#3B82F6']
+  for (let fi = 0; fi < flagBases.length; fi++) {
+    const t = ((flagBases[fi] + scroll * 0.020) % 1)
+    if (t > 0.94 || t < 0.03) continue
+    const fy = HZ + (H - HZ) * t
+    const hw = RW_TOP + (RW_BOT - RW_TOP) * t
+    const sc = 0.2 + 0.8 * t
+    drawLegoFlag(ctx, CX - hw - 6 * sc, fy, sc, flagColors[fi % 2])
+    drawLegoFlag(ctx, CX + hw + 6 * sc, fy, sc, flagColors[(fi + 1) % 2])
+  }
+
+  // ── Curb stripes (red/white) ──────────────────────────────────────────────
+  for (let i = 0; i < 12; i++) {
+    const t1 = ((i / 12 + scroll * 0.028) % 1), t2 = (((i + 0.44) / 12 + scroll * 0.028) % 1)
     if (t2 < t1) continue
     const y1 = HZ + (H - HZ) * t1, y2 = HZ + (H - HZ) * t2
     const hw1 = RW_TOP + (RW_BOT - RW_TOP) * t1, hw2 = RW_TOP + (RW_BOT - RW_TOP) * t2
-    const sw1 = hw1 * 0.13, sw2 = hw2 * 0.13
-    ctx.fillStyle = i % 2 === 0 ? '#dc2626' : '#e5e5e5'
-    ctx.beginPath(); ctx.moveTo(CX - hw1, y1); ctx.lineTo(CX - hw1 + sw1, y1); ctx.lineTo(CX - hw2 + sw2, y2); ctx.lineTo(CX - hw2, y2); ctx.fill()
-    ctx.beginPath(); ctx.moveTo(CX + hw1 - sw1, y1); ctx.lineTo(CX + hw1, y1); ctx.lineTo(CX + hw2, y2); ctx.lineTo(CX + hw2 - sw2, y2); ctx.fill()
+    const sw1 = hw1 * 0.10, sw2 = hw2 * 0.10
+    ctx.fillStyle = i % 2 === 0 ? '#EF4444' : '#F5F5F5'
+    ctx.beginPath(); ctx.moveTo(CX-hw1,y1); ctx.lineTo(CX-hw1+sw1,y1); ctx.lineTo(CX-hw2+sw2,y2); ctx.lineTo(CX-hw2,y2); ctx.fill()
+    ctx.beginPath(); ctx.moveTo(CX+hw1-sw1,y1); ctx.lineTo(CX+hw1,y1); ctx.lineTo(CX+hw2,y2); ctx.lineTo(CX+hw2-sw2,y2); ctx.fill()
   }
 
+  // ── Center dashes ─────────────────────────────────────────────────────────
   for (let i = 0; i < 13; i++) {
-    const t = ((i / 13 + scroll * 0.028) % 1), tEnd = (((i + 0.28) / 13 + scroll * 0.028) % 1)
-    if (tEnd < t) continue
-    const y1 = HZ + (H - HZ) * t, y2 = HZ + (H - HZ) * tEnd
-    const hw = RW_TOP + (RW_BOT - RW_TOP) * t, dw = Math.max(1.5, t * 4)
-    ctx.fillStyle = 'rgba(255,255,255,0.65)'
-    ctx.fillRect(CX - hw / 3 - dw / 2, y1, dw, y2 - y1)
-    ctx.fillRect(CX + hw / 3 - dw / 2, y1, dw, y2 - y1)
-    ctx.fillStyle = 'rgba(255,220,50,0.5)'
+    const t = ((i / 13 + scroll * 0.028) % 1), tE = (((i + 0.22) / 13 + scroll * 0.028) % 1)
+    if (tE < t) continue
+    const y1 = HZ + (H - HZ) * t, y2 = HZ + (H - HZ) * tE
+    const dw = Math.max(1.5, t * 4)
+    ctx.fillStyle = 'rgba(255,255,255,0.8)'
     ctx.fillRect(CX - dw / 2, y1, dw, y2 - y1)
   }
 }
 
+// Pseudo-3D LEGO car — back view with visible top face, cabin, and side-profile wheels
 function drawCar(ctx, cx, cy, scale, color, wobble = 0, isPlayer = false, isBoss = false) {
   ctx.save()
   ctx.translate(cx, cy); ctx.rotate(wobble); ctx.scale(scale, scale)
-  const BW = 30, BH = 50
 
-  ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.beginPath()
-  ctx.ellipse(0, BH * 0.56, BW * 0.52, BH * 0.09, 0, 0, Math.PI * 2); ctx.fill()
+  // ── Dimensions ──────────────────────────────────────────────────────────
+  const BW  = 46   // back face width
+  const BH  = 18   // back face height
+  const TD  = 12   // body top depth (how much roof we see)
+  const TIN = 5    // top face taper inset per side
+  const CW  = 30   // cabin width
+  const CH  = 16   // cabin back face height
+  const CTD = 9    // cabin top depth
+  const CTI = 3    // cabin top inset per side
+  const WR  = 11   // rear wheel radius
 
-  if (isPlayer) { ctx.shadowColor = 'rgba(96,165,250,0.6)'; ctx.shadowBlur = 14 }
-  if (isBoss)   { ctx.shadowColor = 'rgba(255,215,0,0.9)';  ctx.shadowBlur = 20 }
+  // Y anchors — back face is centered at origin
+  const bf_bot = BH / 2
+  const bf_top = -BH / 2
+  const body_top = bf_top - TD          // top of body top-face
+  const cab_bot  = bf_top - TD          // cabin bottom = body top top
+  const cab_top  = cab_bot - CH         // cabin top (back face)
+  const roof_top = cab_top - CTD        // top of cabin top-face
 
-  ctx.fillStyle = color; ctx.beginPath(); ctx.roundRect(-BW/2, -BH/2, BW, BH, 6); ctx.fill()
+  // ── Ground shadow ────────────────────────────────────────────────────────
+  ctx.fillStyle = 'rgba(0,0,0,0.22)'
+  ctx.beginPath()
+  ctx.ellipse(0, bf_bot + WR * 0.9 + 4, BW * 0.6 + WR * 0.5, 7, 0, 0, Math.PI * 2)
+  ctx.fill()
+
+  if (isPlayer) { ctx.shadowColor = 'rgba(96,165,250,0.85)'; ctx.shadowBlur = 22 }
+  if (isBoss)   { ctx.shadowColor = 'rgba(255,215,0,0.95)';  ctx.shadowBlur = 28 }
+
+  // ── Rear wheels (drawn before body so body overlaps inner half) ──────────
+  const wy = bf_bot - WR * 0.85
+  for (const wx of [-BW / 2 - WR * 0.35, BW / 2 + WR * 0.35]) {
+    // Tire (ellipse = side profile view)
+    ctx.fillStyle = '#1a1a1a'
+    ctx.beginPath(); ctx.ellipse(wx, wy, WR * 0.62, WR, 0, 0, Math.PI * 2); ctx.fill()
+    // Tread band
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 2.5
+    ctx.beginPath(); ctx.ellipse(wx, wy, WR * 0.62, WR, 0, 0, Math.PI * 2); ctx.stroke()
+    // Rim face
+    ctx.fillStyle = '#C8C8CC'
+    ctx.beginPath(); ctx.ellipse(wx, wy, WR * 0.37, WR * 0.58, 0, 0, Math.PI * 2); ctx.fill()
+    // Rim shadow ring
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 1
+    ctx.beginPath(); ctx.ellipse(wx, wy, WR * 0.37, WR * 0.58, 0, 0, Math.PI * 2); ctx.stroke()
+    // 5 lug bolts
+    for (let a = 0; a < 5; a++) {
+      const ang = (a / 5) * Math.PI * 2
+      ctx.fillStyle = '#888'
+      ctx.beginPath()
+      ctx.arc(wx + Math.cos(ang) * WR * 0.24, wy + Math.sin(ang) * WR * 0.38, 1.6, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    // Center hub
+    ctx.fillStyle = '#555'
+    ctx.beginPath(); ctx.ellipse(wx, wy, WR * 0.1, WR * 0.16, 0, 0, Math.PI * 2); ctx.fill()
+  }
   ctx.shadowBlur = 0
 
-  ctx.fillStyle = `${color}99`; ctx.beginPath()
-  ctx.roundRect(-BW/2+3, -BH/2, BW-6, BH*0.42, [5,5,2,2]); ctx.fill()
+  // ── Body top face (lighter — faces the sky) ──────────────────────────────
+  ctx.beginPath()
+  ctx.moveTo(-BW / 2,       bf_top)
+  ctx.lineTo( BW / 2,       bf_top)
+  ctx.lineTo( BW / 2 - TIN, body_top)
+  ctx.lineTo(-BW / 2 + TIN, body_top)
+  ctx.closePath()
+  ctx.fillStyle = color; ctx.fill()
+  ctx.fillStyle = 'rgba(255,255,255,0.38)'; ctx.fill()   // sky-facing = lighter
+  // LEGO studs on body top face
+  const studY = (bf_top + body_top) / 2
+  for (const sx of [-13, -4, 4, 13]) {
+    ctx.fillStyle = color
+    ctx.beginPath(); ctx.ellipse(sx, studY, 3.8, 2.4, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 0.7; ctx.stroke()
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 0.6
+    ctx.beginPath(); ctx.ellipse(sx, studY - 0.5, 2.5, 1.5, 0, 0, Math.PI * 2); ctx.stroke()
+  }
+  // Top edge outline
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(-BW/2, bf_top); ctx.lineTo(BW/2, bf_top)
+  ctx.lineTo(BW/2-TIN, body_top); ctx.lineTo(-BW/2+TIN, body_top); ctx.closePath()
+  ctx.stroke()
 
-  ctx.fillStyle = 'rgba(160,215,255,0.82)'; ctx.beginPath()
-  ctx.roundRect(-BW/2+5, -BH/2+4, BW-10, BH*0.26, 3); ctx.fill()
+  // ── Back face (main body panel) ──────────────────────────────────────────
+  ctx.fillStyle = color
+  ctx.beginPath(); ctx.roundRect(-BW/2, bf_top, BW, BH, [2, 2, 6, 6]); ctx.fill()
+  // Panel lines
+  ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 0.8
+  ctx.strokeRect(-BW/2+4, bf_top+2, BW/2-6, BH-4)
+  ctx.strokeRect(2, bf_top+2, BW/2-6, BH-4)
+  // Body outline
+  ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 1.6
+  ctx.beginPath(); ctx.roundRect(-BW/2, bf_top, BW, BH, [2, 2, 6, 6]); ctx.stroke()
 
-  ctx.fillStyle = '#111'; ctx.beginPath()
-  ctx.roundRect(-BW/2+2, BH/2-9, BW-4, 8, [0,0,4,4]); ctx.fill()
-
-  ctx.fillStyle = isBoss ? '#fff' : '#ff3333'
-  ctx.beginPath(); ctx.arc(-BW/2+6, BH/2-5, 3.5, 0, Math.PI*2); ctx.fill()
-  ctx.beginPath(); ctx.arc(BW/2-6, BH/2-5, 3.5, 0, Math.PI*2); ctx.fill()
-
-  if (isPlayer) { ctx.fillStyle='#666'; ctx.fillRect(-BW/2+4, BH/2-2, 5, 4); ctx.fillRect(BW/2-9, BH/2-2, 5, 4) }
-
-  for (const [wx, wy] of [[-BW/2-2,-BH*0.2],[BW/2+2,-BH*0.2],[-BW/2-2,BH*0.26],[BW/2+2,BH*0.26]]) {
-    ctx.beginPath(); ctx.arc(wx, wy, 7, 0, Math.PI*2); ctx.fillStyle='#1a1a1a'; ctx.fill()
-    ctx.beginPath(); ctx.arc(wx, wy, 3.5, 0, Math.PI*2); ctx.fillStyle='#aaa'; ctx.fill()
+  // Tail lights (wide LEGO brick style)
+  const tlColor = isBoss ? '#fff' : '#EF4444'
+  for (const tx of [-BW/2+2, BW/2-13]) {
+    ctx.fillStyle = tlColor
+    ctx.beginPath(); ctx.roundRect(tx, bf_bot-9, 11, 7, 2); ctx.fill()
+    ctx.fillStyle = 'rgba(255,255,255,0.45)'
+    ctx.fillRect(tx+1, bf_bot-9, 3, 3)
+    // glow
+    ctx.fillStyle = isBoss ? 'rgba(255,255,200,0.3)' : 'rgba(239,68,68,0.35)'
+    ctx.beginPath(); ctx.arc(tx+5.5, bf_bot-5.5, 6, 0, Math.PI*2); ctx.fill()
   }
 
-  // Boss crown
+  // Rear bumper
+  ctx.fillStyle = '#2D3748'
+  ctx.beginPath(); ctx.roundRect(-BW/2+1, bf_bot-5, BW-2, 7, [0, 0, 5, 5]); ctx.fill()
+  ctx.fillStyle = 'rgba(255,255,255,0.08)'
+  ctx.fillRect(-BW/2+1, bf_bot-5, BW-2, 2)
+
+  // Exhaust pipes
+  for (const ex of [-BW/2+11, BW/2-11]) {
+    ctx.fillStyle = '#718096'
+    ctx.beginPath(); ctx.ellipse(ex, bf_bot+2, 4, 3, 0, 0, Math.PI*2); ctx.fill()
+    ctx.fillStyle = '#1a1a1a'
+    ctx.beginPath(); ctx.ellipse(ex, bf_bot+2, 2.2, 1.8, 0, 0, Math.PI*2); ctx.fill()
+  }
+
+  // ── Cabin top face (lightest — highest, most sky-facing) ─────────────────
+  ctx.beginPath()
+  ctx.moveTo(-CW/2,       cab_top)
+  ctx.lineTo( CW/2,       cab_top)
+  ctx.lineTo( CW/2 - CTI, roof_top)
+  ctx.lineTo(-CW/2 + CTI, roof_top)
+  ctx.closePath()
+  ctx.fillStyle = color; ctx.fill()
+  ctx.fillStyle = 'rgba(255,255,255,0.50)'; ctx.fill()   // even lighter on top
+  // Roof studs
+  const roofStudY = (cab_top + roof_top) / 2
+  for (const sx of [-8, 0, 8]) {
+    ctx.fillStyle = color
+    ctx.beginPath(); ctx.ellipse(sx, roofStudY, 3.2, 2.0, 0, 0, Math.PI*2); ctx.fill()
+    ctx.fillStyle = 'rgba(255,255,255,0.55)'
+    ctx.beginPath(); ctx.ellipse(sx, roofStudY, 3.2, 2.0, 0, 0, Math.PI*2); ctx.fill()
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 0.6; ctx.stroke()
+  }
+  ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(-CW/2, cab_top); ctx.lineTo(CW/2, cab_top)
+  ctx.lineTo(CW/2-CTI, roof_top); ctx.lineTo(-CW/2+CTI, roof_top); ctx.closePath()
+  ctx.stroke()
+
+  // ── Cabin back face (slightly darker — vertical face) ────────────────────
+  ctx.fillStyle = color
+  ctx.beginPath(); ctx.roundRect(-CW/2, cab_top, CW, CH, [5, 5, 2, 2]); ctx.fill()
+  ctx.fillStyle = 'rgba(0,0,0,0.18)'   // darken for shading
+  ctx.beginPath(); ctx.roundRect(-CW/2, cab_top, CW, CH, [5, 5, 2, 2]); ctx.fill()
+  ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 1.5
+  ctx.beginPath(); ctx.roundRect(-CW/2, cab_top, CW, CH, [5, 5, 2, 2]); ctx.stroke()
+
+  // Rear window glass
+  ctx.fillStyle = 'rgba(186,230,253,0.80)'
+  ctx.beginPath(); ctx.roundRect(-CW/2+5, cab_top+3, CW-10, CH-5, 3); ctx.fill()
+  // Reflection
+  ctx.fillStyle = 'rgba(255,255,255,0.42)'
+  ctx.fillRect(-CW/2+7, cab_top+4, 5, (CH-5)*0.45)
+
+  // ── Minifigure driver visible through rear window ─────────────────────────
+  const dY = cab_top + CH * 0.52
+  // Helmet top
+  ctx.fillStyle = isPlayer ? '#1D4ED8' : isBoss ? '#7C3AED' : '#374151'
+  ctx.beginPath(); ctx.arc(0, dY, 5.8, Math.PI, 0); ctx.fill()
+  // Face (yellow)
+  ctx.fillStyle = '#FCD34D'
+  ctx.beginPath(); ctx.arc(0, dY, 5.8, 0, Math.PI); ctx.fill()
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 0.8; ctx.stroke()
+  // Eyes
+  ctx.fillStyle = '#111'
+  ctx.beginPath(); ctx.arc(-2, dY+1, 1, 0, Math.PI*2); ctx.fill()
+  ctx.beginPath(); ctx.arc(2, dY+1, 1, 0, Math.PI*2); ctx.fill()
+
+  // ── Boss crown floats above roof ─────────────────────────────────────────
   if (isBoss) {
-    ctx.fillStyle = '#ffd700'
-    ctx.font = `${Math.round(12/scale)}px system-ui`
+    ctx.fillStyle = '#FBBF24'
+    ctx.font = `bold ${Math.round(14 / scale)}px system-ui`
     ctx.textAlign = 'center'
-    ctx.fillText('👑', 0, -BH/2 - 8)
+    ctx.fillText('👑', 0, roof_top - 10)
   }
 
   ctx.restore()
@@ -131,16 +397,18 @@ function drawCar(ctx, cx, cy, scale, color, wobble = 0, isPlayer = false, isBoss
 
 function drawFlames(ctx, cx, cy, intensity) {
   if (intensity < 0.05) return
-  ctx.save(); ctx.translate(cx, cy + 29)
-  for (let j = 0; j < 2; j++) {
-    const ox = j === 0 ? -11 : 11, len = intensity * 28 + Math.random() * 7
+  ctx.save(); ctx.translate(cx, cy + 26)
+  for (let j = 0; j < 3; j++) {
+    const ox = (j - 1) * 11, len = intensity * 32 + Math.random() * 8
     const grad = ctx.createLinearGradient(ox, 0, ox, len)
-    grad.addColorStop(0, j === 0 ? '#ff5500' : '#ffcc00')
-    grad.addColorStop(0.5, '#ff8800'); grad.addColorStop(1, 'rgba(255,150,0,0)')
-    ctx.globalAlpha = 0.88; ctx.fillStyle = grad; ctx.beginPath()
-    ctx.moveTo(ox-5, 0)
-    ctx.bezierCurveTo(ox-5, len*0.4, ox, len*0.8, ox, len)
-    ctx.bezierCurveTo(ox, len*0.8, ox+5, len*0.4, ox+5, 0)
+    grad.addColorStop(0, j === 1 ? '#fff' : '#FBBF24')
+    grad.addColorStop(0.3, '#F97316')
+    grad.addColorStop(0.7, '#EF4444')
+    grad.addColorStop(1, 'rgba(239,68,68,0)')
+    ctx.globalAlpha = 0.82; ctx.fillStyle = grad; ctx.beginPath()
+    ctx.moveTo(ox - 5, 0)
+    ctx.bezierCurveTo(ox - 5, len*0.4, ox, len*0.85, ox, len)
+    ctx.bezierCurveTo(ox, len*0.85, ox + 5, len*0.4, ox + 5, 0)
     ctx.fill()
   }
   ctx.globalAlpha = 1; ctx.restore()
@@ -213,6 +481,8 @@ function SkillPill({ skillId, mastery }) {
 
 // ── RaceScreen ─────────────────────────────────────────────────────────────────
 export default function RaceScreen({ playerName, gameState, globalMastery: globalMasteryProp = {}, onRaceComplete }) {
+  // Car upgrade stats — computed once at mount from equipped parts
+  const carStats = computeCarStats(gameState?.equipped_car ?? {})
   const canvasRef  = useRef(null)
   const rafRef     = useRef(null)
   const lastTsRef  = useRef(0)
@@ -288,22 +558,21 @@ export default function RaceScreen({ playerName, gameState, globalMastery: globa
         const wasBossQ  = !!question.isBoss
 
         if (wasBossQ && isPerfect) {
-          // Skip-logic: elevate skill, give skip boost
           m = applySkipLogic(m, question.skillId)
-          p.boost = SKIP_BOOST
+          p.boost = SKIP_BOOST * carStats.boostMult
           setFeedback({ type:'perfect', text:'⚡ SKILL UNLOCKED! Skip boost!' })
         } else if (isPerfect) {
-          p.boost = DOUBLE_BOOST
+          p.boost = DOUBLE_BOOST * carStats.boostMult
           setFeedback({ type:'perfect', text:'⚡ PERFECT SHIFT! ×2 BOOST' })
         } else {
-          p.boost = BOOST_AMOUNT
+          p.boost = BOOST_AMOUNT * carStats.boostMult
           setFeedback({ type:'correct', text:'🔥 NITRO BOOST!' })
         }
         p.fishtail = 0
         missStreak.current = 0
 
       } else {
-        p.fishtail = FISHTAIL_FRAMES; p.boost = 0
+        p.fishtail = Math.round(FISHTAIL_FRAMES * carStats.fishtailMult); p.boost = 0
         G.current.ais.forEach(a => { a.speed *= 1.035 })
         missStreak.current++
 
@@ -383,7 +652,9 @@ export default function RaceScreen({ playerName, gameState, globalMastery: globa
         // Advance player
         if (p.fishtail > 0) p.fishtail = Math.max(0, p.fishtail - frames)
         if (p.boost > 0)    p.boost    = Math.max(0, p.boost * Math.pow(BOOST_DECAY, frames))
-        const speed = BASE_SPEED * (p.fishtail > 0 ? 0.38 : 1.0) + p.boost
+        // carStats comes from closure (mounted once, so safe)
+        const baseSpd = BASE_SPEED * carStats.speedMult
+        const speed = baseSpd * (p.fishtail > 0 ? 0.38 : 1.0) + p.boost * carStats.boostMult
         p.prog  += speed * frames
         g.scroll += speed * frames * 18
 
