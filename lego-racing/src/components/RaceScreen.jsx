@@ -8,20 +8,23 @@ import { computeCarStats } from '../engine/garage.js'
 // ── Constants ──────────────────────────────────────────────────────────────────
 const RACE_LENGTH      = 1.0
 const BASE_SPEED       = 0.00035
-const AI_BASE_SPEEDS   = [0.00032, 0.00036, 0.00039]
-const BOSS_SPEED       = 0.000295         // slightly slower so player can overtake
-const BOOST_AMOUNT     = 0.0028
-const DOUBLE_BOOST     = 0.0052
-const MEGA_BOOST       = 0.008            // pit stop reward
-const SKIP_BOOST       = 0.0065          // boss overtake + fast correct
-const BOOST_DECAY      = 0.935
+// 6 rivals with distinct personalities — some faster than player base, some slower
+const AI_BASE_SPEEDS   = [0.000305, 0.000325, 0.000345, 0.000360, 0.000375, 0.000395]
+// Personality multipliers applied to rubber-band catch-up per rival
+const AI_AGGRESSION    = [0.9, 1.1, 1.3, 0.8, 1.5, 1.0]  // how hard they chase
+const BOSS_SPEED       = 0.000295
+const BOOST_AMOUNT     = 0.0022
+const DOUBLE_BOOST     = 0.0040
+const MEGA_BOOST       = 0.007
+const SKIP_BOOST       = 0.0055
+const BOOST_DECAY      = 0.940
 const FISHTAIL_FRAMES  = 85
 const FAST_MS          = 3000
 const MAX_VISIBLE      = 0.15
-const BOSS_SPAWNS      = [0.28, 0.62]    // track progress where boss appears
-const MISS_STREAK_CAP  = 2               // consecutive misses before pit stop
+const BOSS_SPAWNS      = [0.28, 0.62]
+const MISS_STREAK_CAP  = 2
 
-const AI_COLORS    = ['#ef4444', '#22c55e', '#f59e0b']
+const AI_COLORS    = ['#ef4444', '#22c55e', '#f59e0b', '#a855f7', '#ec4899', '#14b8a6']
 const PLAYER_COLOR = '#60a5fa'
 const BOSS_COLOR   = '#ffd700'
 
@@ -502,9 +505,16 @@ export default function RaceScreen({ playerName, gameState, globalMastery: globa
     phase: 'countdown', cdTimer: 0, cdCount: 3,
     scroll: 0,
     player: { prog: 0, boost: 0, fishtail: 0 },
-    ais: AI_BASE_SPEEDS.map((s, i) => ({ prog: 0.004 * i, speed: s, lane: i, wobble: 0 })),
+    // 6 rivals in a 3-wide grid: row 0 slightly ahead, row 1 slightly behind player
+    ais: AI_BASE_SPEEDS.map((s, i) => ({
+      prog:    [0.018, 0.020, 0.022, 0.004, 0.006, 0.008][i],  // two staggered rows
+      speed:   s,
+      lane:    i % 3,        // lanes 0,1,2 repeated
+      wobble:  0,
+      baseSpeed: s,
+    })),
     bosses: BOSS_SPAWNS.map((startProg, i) => ({
-      prog: startProg, speed: BOSS_SPEED, lane: 0, wobble: 0,
+      prog: startProg, speed: BOSS_SPEED, lane: 1, wobble: 0,
       idx: i, active: false,
     })),
     posUpdateTick: 0,
@@ -658,11 +668,24 @@ export default function RaceScreen({ playerName, gameState, globalMastery: globa
         p.prog  += speed * frames
         g.scroll += speed * frames * 18
 
-        // Advance AIs
+        // Advance AIs with rubber-banding
         g.ais.forEach((a, i) => {
+          const gap = p.prog - a.prog   // positive = player ahead
+          const agg = AI_AGGRESSION[i]
+
+          if (gap > 0.02) {
+            // Player is pulling ahead — scale catch-up with gap size and personality
+            const catchUp = 1.0 + Math.min(0.7, gap * 2.8) * agg
+            a.speed = a.baseSpeed * catchUp
+          } else if (gap < -MAX_VISIBLE * 1.6) {
+            // AI too far ahead — bleed speed so player can chase
+            a.speed = Math.max(a.baseSpeed * 0.82, a.speed * 0.998)
+          } else {
+            // Close pack — drift back toward base speed with slight jitter
+            a.speed = a.speed * 0.97 + a.baseSpeed * 0.03
+          }
+
           a.prog  += a.speed * frames
-          if (a.prog > p.prog + MAX_VISIBLE * 1.8) a.speed *= 0.997
-          if (a.prog < p.prog - 0.08) a.speed = Math.min(AI_BASE_SPEEDS[i] * 1.1, a.speed * 1.001)
           a.wobble = Math.sin(ts * 0.0018 + i * 1.9) * 0.025
         })
 
@@ -696,7 +719,9 @@ export default function RaceScreen({ playerName, gameState, globalMastery: globa
           ].sort((a,b) => b.p - a.p)
           const pos = sorted.findIndex(x => x.name === 'player') + 1
           const delta = masteryDelta(masteryInit.current, masteryRef.current)
-          onRaceComplete?.({ position: pos, coinsEarned: Math.max(0, 4 - pos) * 15, updatedMastery: delta })
+          // Coins: 1st=90, 2nd=60, 3rd=40, 4th=20, 5th+=0
+          const coinsTable = [90, 60, 40, 20, 0, 0, 0]
+          onRaceComplete?.({ position: pos, coinsEarned: coinsTable[pos-1] ?? 0, updatedMastery: delta })
         }
 
         // React state update throttle
@@ -758,7 +783,8 @@ export default function RaceScreen({ playerName, gameState, globalMastery: globa
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [cdDisplay, setCdDisplay] = useState(3)
-  const posBadge = position===1?'🥇 1st':position===2?'🥈 2nd':position===3?'🥉 3rd':'4th'
+  const ordinal = n => ['','1st','2nd','3rd','4th','5th','6th','7th'][n] ?? `${n}th`
+  const posBadge = position===1?'🥇 1st':position===2?'🥈 2nd':position===3?'🥉 3rd':ordinal(position)
 
   return (
     <div style={{ display:'flex', flexDirection:'column', width:'100%', height:'100dvh', overflow:'hidden', background:'#060318' }}>
@@ -798,8 +824,8 @@ export default function RaceScreen({ playerName, gameState, globalMastery: globa
             <div style={{ textAlign:'center' }}>
               <div style={{ fontSize:54 }}>🏁</div>
               <div style={{ fontSize:28, fontWeight:900, color:'white', marginTop:4 }}>RACE COMPLETE!</div>
-              <div style={{ fontSize:20, fontWeight:900, marginTop:4, color: position===1?'#fbbf24':'#94a3b8' }}>
-                {position===1?'🥇 1st Place!':posBadge+' Place'}
+              <div style={{ fontSize:20, fontWeight:900, marginTop:4, color: position===1?'#fbbf24':position<=3?'#f0a500':'#94a3b8' }}>
+                {position===1?'🥇 1st Place!':position===2?'🥈 2nd Place!':position===3?'🥉 3rd Place!':posBadge+' Place'}
               </div>
               <motion.button whileTap={{ scale:0.95 }}
                 onPointerDown={() => {

@@ -198,7 +198,7 @@ export default function App() {
                 className="rounded-2xl p-4 text-center"
                 style={{ background: lastResult.position === 1 ? 'rgba(251,191,36,0.15)' : 'rgba(255,255,255,0.05)', border: `1.5px solid ${lastResult.position === 1 ? 'rgba(251,191,36,0.4)' : 'rgba(255,255,255,0.1)'}` }}>
                 <p className="font-black text-base" style={{ color: lastResult.position === 1 ? '#fbbf24' : 'white' }}>
-                  {lastResult.position === 1 ? '🥇 You won the race!' : lastResult.position === 2 ? '🥈 2nd place!' : lastResult.position === 3 ? '🥉 3rd place!' : '4th — keep practicing!'}
+                  {lastResult.position === 1 ? '🥇 You won the race!' : lastResult.position === 2 ? '🥈 2nd place!' : lastResult.position === 3 ? '🥉 3rd place!' : lastResult.position === 4 ? '4th — so close!' : lastResult.position === 5 ? '5th — keep pushing!' : `${lastResult.position}th — keep practicing!`}
                 </p>
                 {lastResult.coinsEarned > 0 && (
                   <p className="text-sm font-bold mt-1" style={{ color: '#fbbf24' }}>+{lastResult.coinsEarned} 🪙 coins earned!</p>
