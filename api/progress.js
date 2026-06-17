@@ -12,13 +12,12 @@
 import { Redis } from '@upstash/redis'
 import { REDIS_KEY, defaultProfile, mergeProfile } from '../shared/schema.js'
 
-const useRedis = !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN)
+// Accept both Vercel Upstash integration naming (KV_REST_API_*) and explicit UPSTASH_* naming
+const REDIS_URL   = process.env.UPSTASH_REDIS_REST_URL  || process.env.KV_REST_API_URL
+const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN
 
-const redis = useRedis
-  ? new Redis({
-      url: process.env.UPSTASH_REDIS_REST_URL,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN,
-    })
+const redis = (REDIS_URL && REDIS_TOKEN)
+  ? new Redis({ url: REDIS_URL, token: REDIS_TOKEN })
   : null
 
 const mockStore = new Map()
