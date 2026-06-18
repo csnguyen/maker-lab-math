@@ -8,10 +8,10 @@ import { computeCarStats } from '../engine/garage.js'
 // ── Constants ──────────────────────────────────────────────────────────────────
 const RACE_LENGTH      = 1.0
 const BASE_SPEED       = 0.00035
-// 6 rivals with distinct personalities — some faster than player base, some slower
-const AI_BASE_SPEEDS   = [0.000305, 0.000325, 0.000345, 0.000360, 0.000375, 0.000395]
+// 6 rivals — two are actually faster than the player baseline so the pack is dangerous
+const AI_BASE_SPEEDS   = [0.000325, 0.000345, 0.000360, 0.000378, 0.000395, 0.000415]
 // Personality multipliers applied to rubber-band catch-up per rival
-const AI_AGGRESSION    = [0.9, 1.1, 1.3, 0.8, 1.5, 1.0]  // how hard they chase
+const AI_AGGRESSION    = [1.1, 1.3, 1.0, 1.5, 1.2, 1.8]  // how hard they chase
 const BOSS_SPEED       = 0.000295
 const BOOST_AMOUNT     = 0.0022
 const DOUBLE_BOOST     = 0.0040
@@ -673,16 +673,16 @@ export default function RaceScreen({ playerName, gameState, globalMastery: globa
           const gap = p.prog - a.prog   // positive = player ahead
           const agg = AI_AGGRESSION[i]
 
-          if (gap > 0.02) {
-            // Player is pulling ahead — scale catch-up with gap size and personality
-            const catchUp = 1.0 + Math.min(0.7, gap * 2.8) * agg
+          if (gap > 0.008) {
+            // Player is pulling ahead — aggressive catch-up scales with gap and personality
+            const catchUp = 1.0 + Math.min(1.4, gap * 6.0) * agg
             a.speed = a.baseSpeed * catchUp
           } else if (gap < -MAX_VISIBLE * 1.6) {
             // AI too far ahead — bleed speed so player can chase
-            a.speed = Math.max(a.baseSpeed * 0.82, a.speed * 0.998)
+            a.speed = Math.max(a.baseSpeed * 0.85, a.speed * 0.999)
           } else {
-            // Close pack — drift back toward base speed with slight jitter
-            a.speed = a.speed * 0.97 + a.baseSpeed * 0.03
+            // Close pack — stay competitive, only slight drift toward base
+            a.speed = a.speed * 0.985 + a.baseSpeed * 0.015
           }
 
           a.prog  += a.speed * frames
